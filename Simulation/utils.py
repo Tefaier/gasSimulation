@@ -53,4 +53,4 @@ def one_sided_elastic_collision(
     return new_velocity
 
 def positive_index_to_negative(index: int, size: int) -> int:
-    pass
+    return index - size

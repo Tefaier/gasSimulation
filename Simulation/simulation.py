@@ -71,12 +71,37 @@ class Simulation:
         self.borders_history_id = [0] * self.borders_count
         self.borders_temperature = [None] * self.borders_count
 
-    def calculate_border_collision_time(self, molecule_id: int, border_id: int) -> float:
-        pass
+    def calculate_border_collision_time(self, molecule_id: int, border_id: int) -> float | None:
+        axis_mask = self.borders_normal[border_id].value.id
+        speed_diff = self.borders_vel[border_id] - self.molecules_vel[molecule_id][axis_mask]
+        if abs(speed_diff) < 1e-8: return None
+        return (
+                (self.molecules_radius[border_id]
+                   + self.molecules_pos[border_id][axis_mask]
+                   - self.borders_pos[border_id]
+                   - self.molecules_vel[molecule_id][axis_mask] * self.molecules_pos_time[molecule_id]
+                   + self.borders_vel[border_id] * self.borders_pos_time[border_id])
+                / speed_diff
+        )
 
     def calculate_molecule_interaction(self, molecule_id: int):
-        # TODO add interaction calculation
-        pass
+        min_time = 0
+        min_id = None
+        is_border = True
+        for border_id in range(0, self.borders_count):
+            time = self.calculate_border_collision_time(molecule_id, border_id)
+            if time > self.time_since_start and (min_id is None or min_time > time):
+                min_time = time
+                min_id = border_id
+
+        pos = self.molecules_pos[molecule_id]
+        vel = self.molecules_vel[molecule_id]
+        rad = self.molecules_radius[molecule_id]
+        time = self.molecules_pos_time[molecule_id]
+        # a * t**2 + b * t + c = 0
+        a = np.sum((vel[np.newaxis, :] - self.molecules_vel) ** 2, axis=1)
+        b = np.sum(2 * (self.molecules_vel - vel[np.newaxis, :]) * (self.molecules_pos - pos[np.newaxis, :] + time * vel[np.newaxis, :] - self.molecules_pos_time * self.molecules_vel), axis=1)
+        c =  - ((rad + self.molecules_radius) ** 2)
 
     def synch_molecule_pair(self, molecule_initiator_id: int, ignore_pair: int = -1):
         paired_id = self.molecules_expected_pair[molecule_initiator_id]
@@ -111,7 +136,7 @@ class Simulation:
         for molecule_index in range(0, self.molecules_count):
             time = self.calculate_border_collision_time(molecule_index, border_id)
             current_time = self.molecules_closest_interaction_time[molecule_index]
-            if current_time is None or current_time > time:
+            if time is not None and time > self.time_since_start and (current_time is None or current_time > time):
                 self.interaction_queue.put((
                     time,
                     molecule_index,
