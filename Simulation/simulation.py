@@ -115,7 +115,7 @@ class Simulation:
                 self.interaction_queue.put((
                     time,
                     molecule_index,
-                    self.molecules_history_id[molecule_index], 
+                    self.molecules_history_id[molecule_index],
                     positive_index_to_negative(border_id, self.borders_count),
                     self.borders_history_id[molecule_index]
                 ))
