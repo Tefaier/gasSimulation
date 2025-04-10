@@ -24,13 +24,14 @@ diffx = Symbol('diffx')
 diffy = Symbol('diffy')
 diffz = Symbol('diffz')
 
-eq_main = diffx**2 + diffy**2 + diffz**2 - (r1 + r2)**2
+eq_main = diffx**2 - (r1 + r2)**2
 substX = x1 + vx1 * (t - t1) - x2 - vx2 * (t - t2)
 substY = y1 + vy1 * (t - t1) - y2 - vy2 * (t - t2)
 substZ = z1 + vz1 * (t - t1) - z2 - vz2 * (t - t2)
 
 final_eq = eq_main.subs(diffx, substX)
-final_eq = final_eq.subs(diffy, substY)
-final_eq = final_eq.subs(diffz, substZ)
 final_eq = collect(expand(final_eq), t)
 print(final_eq)
+new_eq = final_eq - t * (2 * (vx2-vx1) * (x2-x1+t1*vx1-t2*vx2))
+new_eq = collect(expand(new_eq), t)
+print(new_eq)

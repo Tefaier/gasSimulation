@@ -5,7 +5,7 @@ from queue import PriorityQueue
 
 from Simulation.models import Axis
 from Simulation.utils import polar_to_cartesian, elastic_balls_interaction, one_sided_elastic_collision, \
-    positive_index_to_negative
+    positive_index_to_negative, cartesian_product
 
 
 class Simulation:
@@ -43,7 +43,7 @@ class Simulation:
         self.molecules_count = n
         self.time_since_start = 0
         side_length = initial_volume ** (1/3)
-        self.init_molecules(molecule_radius, molecules_weight, side_length * 0.5, initial_max_speed)
+        self.init_molecules(molecule_radius, molecules_weight, side_length * 0.5 - molecule_radius * 1.1, initial_max_speed)
         self.init_borders(side_length / 2)
         self.interaction_queue = PriorityQueue()
         for molecule_id in range(0, n):
@@ -52,7 +52,13 @@ class Simulation:
     def init_molecules(self, radius: float, weight: float, max_offset: float, max_speed: float):
         self.molecules_radius = np.ones(shape=(self.molecules_count,)) * radius
         self.molecules_weight = np.ones(shape=(self.molecules_count,)) * weight
-        self.molecules_pos = np.random.rand(self.molecules_count, 3) * 2 * max_offset - max_offset
+        while True:
+            self.molecules_pos = np.random.rand(self.molecules_count, 3) * 2 * max_offset - max_offset
+            cross = cartesian_product(self.molecules_pos, self.molecules_pos)
+            cross[np.eye(self.molecules_count, self.molecules_count) > 0.5, 0, :] = 1e10
+            min_dist_2 = np.min(np.sum(((cross[:, :, 0, :] - cross[:, :, 1, :]) ** 2), axis=2))
+            if min_dist_2 > self.molecules_radius[0]**2:
+                break
         self.molecules_vel = polar_to_cartesian(
             np.random.rand(self.molecules_count) * max_speed,
             np.random.rand(self.molecules_count) * 2 * np.pi,
@@ -77,7 +83,7 @@ class Simulation:
         speed_diff = self.borders_vel[border_id] - self.molecules_vel[molecule_id][axis_mask]
         if abs(speed_diff) < 1e-8: return None
         return (
-                (self.molecules_radius[molecule_id]
+                (self.molecules_radius[molecule_id] * (1 if border_id % 2 == 1 else -1)
                    + self.molecules_pos[molecule_id][axis_mask]
                    - self.borders_pos[border_id]
                    - self.molecules_vel[molecule_id][axis_mask] * self.molecules_pos_time[molecule_id]
@@ -104,8 +110,8 @@ class Simulation:
         b = np.sum(2 * (self.molecules_vel - vel[np.newaxis, :]) * (self.molecules_pos - pos[np.newaxis, :] + time * vel[np.newaxis, :] - self.molecules_pos_time[:, np.newaxis] * self.molecules_vel), axis=1)
         c =  - ((rad + self.molecules_radius) ** 2) + np.sum((time * vel[np.newaxis, :] - self.molecules_pos_time[:, np.newaxis] * self.molecules_vel + self.molecules_pos - pos[np.newaxis, :])**2, axis=1)
         d = b ** 2 - 4 * a * c
-        solutions = np.concatenate([((-b-np.sqrt(d))/2).reshape((self.molecules_count, 1)), ((-b+np.sqrt(d))/2).reshape((self.molecules_count, 1))], axis=1)
-        solutions[d < 0, :] = 1e10
+        solutions = np.concatenate([((-b-np.sqrt(d))/(2 * a)).reshape((self.molecules_count, 1)), ((-b+np.sqrt(d))/(2 * a)).reshape((self.molecules_count, 1))], axis=1)
+        solutions[d <= 0, :] = 1e10
         solutions[solutions < self.time_since_start + 1e-8] = 1e10
         min_index = np.unravel_index(np.argmin(solutions, axis=None), solutions.shape)
         new_min = solutions[min_index]
@@ -214,6 +220,11 @@ class Simulation:
                     self.molecules_vel[entity_id_2],
                     self.molecules_weight[entity_id_2],
                 )
+                # print(f"Distance is {np.linalg.norm(self.molecules_pos[0] - self.molecules_pos[1])}")
                 self.update_molecule(entity_id_1, new_vel_1, time - self.molecules_pos_time[entity_id_1], 1e-8, entity_id_2)
                 self.update_molecule(entity_id_2, new_vel_2, time - self.molecules_pos_time[entity_id_2], 1e-8, entity_id_1)
+        # print(f"Distance is {np.linalg.norm(self.molecules_pos[0] - self.molecules_pos[1])}")
+        # print(self.interaction_queue.qsize())
 
+    def get_current_positions(self):
+        return self.molecules_pos + self.molecules_vel * ((self.time_since_start - self.molecules_pos_time)[:, np.newaxis])

@@ -2,6 +2,13 @@ from typing import Any, Tuple, Literal
 
 import numpy as np
 
+def cartesian_product(x, y):  # makes array with (y_size, x_size, 2, 3)
+    dim_x = len(x)
+    dim_y = len(y)
+    dim_info = x.shape[-1]
+    x_r = np.tile(x, (dim_y, 1)).reshape((dim_y, dim_x, dim_info))
+    y_r = np.repeat(y, dim_x, axis=0).reshape((dim_y, dim_x, dim_info))
+    return np.concatenate([x_r, y_r], axis=2).reshape((dim_y, dim_x, 2, dim_info))
 
 def polar_to_cartesian(r: np.ndarray[Any, np.dtype[np.float64]], theta: np.ndarray[Any, np.dtype[np.float64]], ksi: np.ndarray[Any, np.dtype[np.float64]]) -> np.ndarray[Any, np.dtype[np.float64]]:
     if type(r) is float:
@@ -33,9 +40,12 @@ def elastic_balls_interaction(
 ) -> Tuple[np.ndarray[Tuple[Literal[3]], np.dtype[np.float64]], np.ndarray[Tuple[Literal[3]], np.dtype[np.float64]]]:
     contact_normal = vec_normalize(pos_2 - pos_1)
     m_reduced = 1 / (1 / weight_1 + 1 / weight_2)
-    impact_vel = np.dot(contact_normal, vel_2 - vel_1)
+    impact_vel = np.dot(contact_normal, vel_1 - vel_2)
     impulse_shift = 2 * m_reduced * impact_vel
-    return vel_1 - impulse_shift * contact_normal / weight_1, vel_2 + impulse_shift * contact_normal / weight_2
+    new_vel_1 = vel_1 - impulse_shift * contact_normal / weight_1
+    new_vel_2 = vel_2 + impulse_shift * contact_normal / weight_2
+    # print(f"Energy before {weight_1 * (np.linalg.norm(vel_1)**2) + weight_2*(np.linalg.norm(vel_2)**2)} after {weight_1 * (np.linalg.norm(new_vel_1)**2) + weight_2*(np.linalg.norm(new_vel_2)**2)}")
+    return new_vel_1, new_vel_2
 
 def one_sided_elastic_collision(
         pos: np.ndarray[Tuple[Literal[3]], np.dtype[np.float64]],
