@@ -11,8 +11,8 @@ def polar_to_cartesian(r: np.ndarray[Any, np.dtype[np.float64]], theta: np.ndarr
 
     result = np.zeros((*r.shape, 3))
 
-    result[:, 0] = np.sin(ksi) * np.cos(theta[:, 1])
-    result[:, 1] = np.sin(ksi) * np.sin(theta[:, 1])
+    result[:, 0] = np.sin(ksi) * np.cos(theta)
+    result[:, 1] = np.sin(ksi) * np.sin(theta)
     result[:, 2] = np.cos(ksi)
 
     result *= r[:, np.newaxis]

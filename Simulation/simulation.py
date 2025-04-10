@@ -45,6 +45,7 @@ class Simulation:
         side_length = initial_volume ** (1/3)
         self.init_molecules(molecule_radius, molecules_weight, side_length * 0.5, initial_max_speed)
         self.init_borders(side_length / 2)
+        self.interaction_queue = PriorityQueue()
         for molecule_id in range(0, n):
             self.calculate_molecule_interaction(molecule_id)
 
@@ -76,8 +77,8 @@ class Simulation:
         speed_diff = self.borders_vel[border_id] - self.molecules_vel[molecule_id][axis_mask]
         if abs(speed_diff) < 1e-8: return None
         return (
-                (self.molecules_radius[border_id]
-                   + self.molecules_pos[border_id][axis_mask]
+                (self.molecules_radius[molecule_id]
+                   + self.molecules_pos[molecule_id][axis_mask]
                    - self.borders_pos[border_id]
                    - self.molecules_vel[molecule_id][axis_mask] * self.molecules_pos_time[molecule_id]
                    + self.borders_vel[border_id] * self.borders_pos_time[border_id])
@@ -100,8 +101,37 @@ class Simulation:
         time = self.molecules_pos_time[molecule_id]
         # a * t**2 + b * t + c = 0
         a = np.sum((vel[np.newaxis, :] - self.molecules_vel) ** 2, axis=1)
-        b = np.sum(2 * (self.molecules_vel - vel[np.newaxis, :]) * (self.molecules_pos - pos[np.newaxis, :] + time * vel[np.newaxis, :] - self.molecules_pos_time * self.molecules_vel), axis=1)
-        c =  - ((rad + self.molecules_radius) ** 2)
+        b = np.sum(2 * (self.molecules_vel - vel[np.newaxis, :]) * (self.molecules_pos - pos[np.newaxis, :] + time * vel[np.newaxis, :] - self.molecules_pos_time[:, np.newaxis] * self.molecules_vel), axis=1)
+        c =  - ((rad + self.molecules_radius) ** 2) + np.sum((time * vel[np.newaxis, :] - self.molecules_pos_time[:, np.newaxis] * self.molecules_vel + self.molecules_pos - pos[np.newaxis, :])**2, axis=1)
+        d = b ** 2 - 4 * a * c
+        solutions = np.concatenate([((-b-np.sqrt(d))/2).reshape((self.molecules_count, 1)), ((-b+np.sqrt(d))/2).reshape((self.molecules_count, 1))], axis=1)
+        solutions[d < 0, :] = 1e10
+        solutions[solutions < self.time_since_start + 1e-8] = 1e10
+        min_index = np.unravel_index(np.argmin(solutions, axis=None), solutions.shape)
+        new_min = solutions[min_index]
+        if new_min < min_time:
+            min_time = new_min
+            min_id = min_index[0]
+            is_border = False
+        self.molecules_closest_interaction_time[molecule_id] = min_time
+        if is_border:
+            self.molecules_expected_pair[molecule_id] = -1
+            self.interaction_queue.put((
+                min_time,
+                molecule_id,
+                self.molecules_history_id[molecule_id],
+                positive_index_to_negative(min_id, self.borders_count),
+                self.borders_history_id[min_id]
+            ))
+        else:
+            self.molecules_expected_pair[molecule_id] = min_id
+            self.interaction_queue.put((
+                min_time,
+                molecule_id,
+                self.molecules_history_id[molecule_id],
+                min_id,
+                self.molecules_history_id[min_id]
+            ))
 
     def synch_molecule_pair(self, molecule_initiator_id: int, ignore_pair: int = -1):
         paired_id = self.molecules_expected_pair[molecule_initiator_id]
@@ -157,11 +187,12 @@ class Simulation:
     def make_iteration(self):
         interaction = self.interaction_queue.get()
         time = interaction[0]
+        self.time_since_start = time
         entity_id_1 = interaction[1]
         entity_id_2 = interaction[3]
         if self.validate_interaction(entity_id_1, interaction[2]) \
                 and self.validate_interaction(entity_id_2, interaction[4]):
-            if entity_id_1 >= 0 ^ entity_id_2 >= 0:
+            if (entity_id_1 >= 0) ^ (entity_id_2 >= 0):
                 # one of them is a border
                 border_id = entity_id_1 if entity_id_1 < 0 else entity_id_2
                 molecule_id = entity_id_1 if entity_id_1 >= 0 else entity_id_2
