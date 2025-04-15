@@ -5,6 +5,10 @@ import numpy as np
 def cartesian_product(x, y):  # makes array with (y_size, x_size, 2, 3)
     dim_x = len(x)
     dim_y = len(y)
+    if len(x.shape) == 1:
+        x_r = np.tile(x, dim_y).reshape((dim_y, dim_x, 1))
+        y_r = np.repeat(y, dim_x, axis=0).reshape((dim_y, dim_x, 1))
+        return np.concatenate([x_r, y_r], axis=2)
     dim_info = x.shape[-1]
     x_r = np.tile(x, (dim_y, 1)).reshape((dim_y, dim_x, dim_info))
     y_r = np.repeat(y, dim_x, axis=0).reshape((dim_y, dim_x, dim_info))

@@ -52,12 +52,14 @@ class Simulation:
     def init_molecules(self, radius: float, weight: float, max_offset: float, max_speed: float):
         self.molecules_radius = np.ones(shape=(self.molecules_count,)) * radius
         self.molecules_weight = np.ones(shape=(self.molecules_count,)) * weight
+        radius_cross = cartesian_product(self.molecules_radius, self.molecules_radius)
+        radius_cross = (radius_cross[:, :, 0] + radius_cross[:, :, 1]) ** 2
         while True:
             self.molecules_pos = np.random.rand(self.molecules_count, 3) * 2 * max_offset - max_offset
             cross = cartesian_product(self.molecules_pos, self.molecules_pos)
             cross[np.eye(self.molecules_count, self.molecules_count) > 0.5, 0, :] = 1e10
-            min_dist_2 = np.min(np.sum(((cross[:, :, 0, :] - cross[:, :, 1, :]) ** 2), axis=2))
-            if min_dist_2 > self.molecules_radius[0]**2:
+            min_dist_2 = np.min(np.sum(((cross[:, :, 0, :] - cross[:, :, 1, :]) ** 2), axis=2) - radius_cross)
+            if min_dist_2 > 0:
                 break
         self.molecules_vel = polar_to_cartesian(
             np.random.rand(self.molecules_count) * max_speed,
