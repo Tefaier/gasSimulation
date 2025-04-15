@@ -18,7 +18,7 @@ class Simulation:
     molecules_vel: np.ndarray[Any, np.dtype[np.float64]]
     molecules_pos_time: np.ndarray[Any, np.dtype[np.float64]]
     molecules_history_id: list[int]
-    molecules_expected_pair: list[int]  # if -1 then it is not a molecule or there is nothing at all
+    molecules_queue_presence: list[int]
     molecules_closest_interaction_time: list[float | None]
 
     borders_count: int
@@ -66,7 +66,7 @@ class Simulation:
         )
         self.molecules_pos_time = np.zeros(shape=(self.molecules_count,))
         self.molecules_history_id = [0] * self.molecules_count
-        self.molecules_expected_pair = [-1] * self.molecules_count
+        self.molecules_queue_presence = [0] * self.molecules_count
         self.molecules_closest_interaction_time = [0] * self.molecules_count
 
     def init_borders(self, offset: float):
@@ -122,8 +122,8 @@ class Simulation:
             min_id = min_index[0]
             is_border = False
         self.molecules_closest_interaction_time[molecule_id] = min_time
+        self.molecules_queue_presence[molecule_id] += 1
         if is_border:
-            self.molecules_expected_pair[molecule_id] = -1
             self.interaction_queue.put((
                 min_time,
                 molecule_id,
@@ -132,7 +132,7 @@ class Simulation:
                 self.borders_history_id[min_id]
             ))
         else:
-            self.molecules_expected_pair[molecule_id] = min_id
+            self.molecules_queue_presence[min_id] += 1
             self.interaction_queue.put((
                 min_time,
                 molecule_id,
@@ -142,10 +142,7 @@ class Simulation:
             ))
 
     def synch_molecule_pair(self, molecule_initiator_id: int, ignore_pair: int = -1):
-        paired_id = self.molecules_expected_pair[molecule_initiator_id]
-        if (not paired_id == -1) and self.molecules_expected_pair[paired_id] == molecule_initiator_id and (not paired_id == ignore_pair):
-            self.molecules_expected_pair[paired_id] = -1
-            self.calculate_molecule_interaction(paired_id)
+        pass
 
     def update_molecule(
             self,
@@ -174,6 +171,7 @@ class Simulation:
             time = self.calculate_border_collision_time(molecule_index, border_id)
             current_time = self.molecules_closest_interaction_time[molecule_index]
             if time is not None and time > self.time_since_start and (current_time is None or current_time > time):
+                self.molecules_queue_presence[molecule_index] += 1
                 self.interaction_queue.put((
                     time,
                     molecule_index,
@@ -226,6 +224,11 @@ class Simulation:
                 # print(f"Distance is {np.linalg.norm(self.molecules_pos[0] - self.molecules_pos[1])}")
                 self.update_molecule(entity_id_1, new_vel_1, time - self.molecules_pos_time[entity_id_1], pair_to_ignore=entity_id_2)
                 self.update_molecule(entity_id_2, new_vel_2, time - self.molecules_pos_time[entity_id_2], pair_to_ignore=entity_id_1)
+        for id in [entity_id_1, entity_id_2]:
+            if id >= 0:
+                self.molecules_queue_presence[id] -= 1
+                if self.molecules_queue_presence[id] == 0:
+                    self.calculate_molecule_interaction(id)
         # print(f"Distance is {np.linalg.norm(self.molecules_pos[0] - self.molecules_pos[1])}")
         # present_0 = False
         # present_1 = False
