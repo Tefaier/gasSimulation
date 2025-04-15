@@ -5,7 +5,7 @@ from queue import PriorityQueue
 
 from Simulation.models import Axis
 from Simulation.utils import polar_to_cartesian, elastic_balls_interaction, one_sided_elastic_collision, \
-    positive_index_to_negative, cartesian_product
+    positive_index_to_negative, cartesian_product, boltzmann_constant
 
 
 class Simulation:
@@ -49,17 +49,22 @@ class Simulation:
         for molecule_id in range(0, n):
             self.calculate_molecule_interaction(molecule_id)
 
+    def validate_positions(self) -> bool:
+        for molecule_id in range(0, self.molecules_count):
+            radius_total = (self.molecules_radius + self.molecules_radius[molecule_id]) ** 2
+            distances = np.sum((self.molecules_pos - self.molecules_pos[molecule_id][np.newaxis, :]) ** 2, axis=1)
+            difference = distances - radius_total
+            difference[molecule_id] = 1
+            if np.min(difference) < 0:
+                return False
+        return True
+
     def init_molecules(self, radius: float, weight: float, max_offset: float, max_speed: float):
         self.molecules_radius = np.ones(shape=(self.molecules_count,)) * radius
         self.molecules_weight = np.ones(shape=(self.molecules_count,)) * weight
-        radius_cross = cartesian_product(self.molecules_radius, self.molecules_radius)
-        radius_cross = (radius_cross[:, :, 0] + radius_cross[:, :, 1]) ** 2
         while True:
             self.molecules_pos = np.random.rand(self.molecules_count, 3) * 2 * max_offset - max_offset
-            cross = cartesian_product(self.molecules_pos, self.molecules_pos)
-            cross[np.eye(self.molecules_count, self.molecules_count) > 0.5, 0, :] = 1e10
-            min_dist_2 = np.min(np.sum(((cross[:, :, 0, :] - cross[:, :, 1, :]) ** 2), axis=2) - radius_cross)
-            if min_dist_2 > 0:
+            if self.validate_positions():
                 break
         self.molecules_vel = polar_to_cartesian(
             np.random.rand(self.molecules_count) * max_speed,
@@ -85,7 +90,7 @@ class Simulation:
         speed_diff = self.borders_vel[border_id] - self.molecules_vel[molecule_id][axis_mask]
         # if abs(speed_diff) < 1e-8: return None
         return (
-                (self.molecules_radius[molecule_id] * (-1 if border_id % 2 == 1 else 1) * (1 if border_id >= 0 else -1)
+                (self.molecules_radius[molecule_id] * (-1 if border_id % 2 == 0 else 1)
                    + self.molecules_pos[molecule_id][axis_mask]
                    - self.borders_pos[border_id]
                    - self.molecules_vel[molecule_id][axis_mask] * self.molecules_pos_time[molecule_id]
@@ -166,7 +171,9 @@ class Simulation:
     def force_molecule_speed(self, molecule_id: int, speed: float):
         self.update_molecule(molecule_id, polar_to_cartesian(speed, np.random.random() * 2 * np.pi, np.random.random() * np.pi).reshape(3,), 0)
 
+    # if speed positive volume reduces, if negative increases
     def force_border_speed(self, border_id: int, speed: float):
+        speed *= (-1 if border_id % 2 == 1 else 1)
         self.borders_pos[border_id] += self.borders_vel[border_id] * (self.time_since_start - self.borders_pos_time[border_id])
         self.borders_vel[border_id] = speed
         self.borders_pos_time[border_id]  = self.time_since_start
@@ -181,7 +188,7 @@ class Simulation:
                     molecule_index,
                     self.molecules_history_id[molecule_index],
                     positive_index_to_negative(border_id, self.borders_count),
-                    self.borders_history_id[molecule_index]
+                    self.borders_history_id[border_id]
                 ))
 
     def set_border_temperature(self, border_id: int, temperature: float):
@@ -206,12 +213,12 @@ class Simulation:
                 border_id = entity_id_1 if entity_id_1 < 0 else entity_id_2
                 molecule_id = entity_id_1 if entity_id_1 >= 0 else entity_id_2
                 print(f"border {border_id} by {molecule_id} with {self.molecules_history_id[molecule_id]} at {interaction[0]}")
+                temp = self.borders_temperature[border_id]
                 new_vel = one_sided_elastic_collision(
-                    self.molecules_pos[molecule_id],
                     self.molecules_vel[molecule_id],
-                    self.borders_normal[border_id].value.normal,
-                    self.borders_vel[border_id]
-                    # TODO add support for border temperature here with enforcing speed
+                    self.borders_normal[border_id].value.normal * (-1 if border_id % 2 == 1 else 1),
+                    self.borders_vel[border_id] * (-1 if border_id % 2 == 1 else 1),
+                    None if temp is None else (np.sqrt(3 * boltzmann_constant * temp / self.molecules_weight[border_id]))
                 )
                 self.update_molecule(molecule_id, new_vel, time - self.molecules_pos_time[molecule_id], pair_to_ignore=border_id)
             else:

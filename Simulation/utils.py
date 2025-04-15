@@ -2,6 +2,8 @@ from typing import Any, Tuple, Literal
 
 import numpy as np
 
+boltzmann_constant = 1.380649e-23
+
 def cartesian_product(x, y):  # makes array with (y_size, x_size, 2, 3)
     dim_x = len(x)
     dim_y = len(y)
@@ -16,9 +18,9 @@ def cartesian_product(x, y):  # makes array with (y_size, x_size, 2, 3)
 
 def polar_to_cartesian(r: np.ndarray[Any, np.dtype[np.float64]], theta: np.ndarray[Any, np.dtype[np.float64]], ksi: np.ndarray[Any, np.dtype[np.float64]]) -> np.ndarray[Any, np.dtype[np.float64]]:
     if type(r) is float:
-        r = np.ndarray([r])
-        theta = np.ndarray([theta])
-        ksi = np.ndarray([ksi])
+        r = np.array([r])
+        theta = np.array([theta])
+        ksi = np.array([ksi])
 
     result = np.zeros((*r.shape, 3))
 
@@ -52,18 +54,19 @@ def elastic_balls_interaction(
     return new_vel_1, new_vel_2
 
 def one_sided_elastic_collision(
-        pos: np.ndarray[Tuple[Literal[3]], np.dtype[np.float64]],
         vel: np.ndarray[Tuple[Literal[3]], np.dtype[np.float64]],
-        contact_normal: np.ndarray[Tuple[Literal[3]], np.dtype[np.float64]],
+        contact_normal: np.ndarray[Tuple[Literal[3]], np.dtype[np.float64]],  # normal must look into bounce area
         contact_speed: float = 0,  # if positive increases bounce, if negative reduces bounce
         absolute_speed_force: float = None  # should be used for temperature to enforce speed after collision, for now if present, contact_speed must be 0
 ) -> np.ndarray[Tuple[Literal[3]], np.dtype[np.float64]]:
-    in_normal_speed = abs(np.dot(contact_normal, vel))
-    if contact_speed < -in_normal_speed:
+    in_normal_speed = np.dot(contact_normal, vel)
+    # check that bounce is impossible
+    if contact_speed < in_normal_speed:
         return vel
-    new_velocity = vel - contact_normal * np.dot(contact_normal, vel) * (2 + contact_speed / in_normal_speed)
+    new_velocity = vel - ((contact_normal * in_normal_speed * 2) if in_normal_speed < 0 else 0)  # just rebounce
     if absolute_speed_force is not None:
-        return vec_normalize(new_velocity) * absolute_speed_force
+        new_velocity = vec_normalize(new_velocity) * absolute_speed_force
+    new_velocity += contact_normal * contact_speed  # modification of velocity according to border movement
     return new_velocity
 
 def positive_index_to_negative(index: int, size: int) -> int:
