@@ -83,7 +83,7 @@ class Simulation:
         speed_diff = self.borders_vel[border_id] - self.molecules_vel[molecule_id][axis_mask]
         # if abs(speed_diff) < 1e-8: return None
         return (
-                (self.molecules_radius[molecule_id] * (-1 if border_id % 2 == 1 else 1) * (-1 if border_id >= 0 else 1)
+                (self.molecules_radius[molecule_id] * (-1 if border_id % 2 == 1 else 1) * (1 if border_id >= 0 else -1)
                    + self.molecules_pos[molecule_id][axis_mask]
                    - self.borders_pos[border_id]
                    - self.molecules_vel[molecule_id][axis_mask] * self.molecules_pos_time[molecule_id]
@@ -98,6 +98,7 @@ class Simulation:
         is_border = True
         for border_id in range(-1, -self.borders_count - 1, -1):
             time = self.calculate_border_collision_time(molecule_id, border_id)
+            # print(time * self.molecules_vel[molecule_id] + self.molecules_pos[molecule_id])
             if time > cutoff_time and (min_id is None or min_time > time) and (not id_to_ignore == border_id):
                 min_time = time
                 min_id = border_id
