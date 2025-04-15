@@ -81,9 +81,9 @@ class Simulation:
     def calculate_border_collision_time(self, molecule_id: int, border_id: int) -> float | None:
         axis_mask = self.borders_normal[border_id].value.id
         speed_diff = self.borders_vel[border_id] - self.molecules_vel[molecule_id][axis_mask]
-        if abs(speed_diff) < 1e-8: return None
+        # if abs(speed_diff) < 1e-8: return None
         return (
-                (self.molecules_radius[molecule_id] * (1 if border_id % 2 == 1 else -1)
+                (self.molecules_radius[molecule_id] * (-1 if border_id % 2 == 1 else 1) * (-1 if border_id >= 0 else 1)
                    + self.molecules_pos[molecule_id][axis_mask]
                    - self.borders_pos[border_id]
                    - self.molecules_vel[molecule_id][axis_mask] * self.molecules_pos_time[molecule_id]
@@ -91,13 +91,13 @@ class Simulation:
                 / speed_diff
         )
 
-    def calculate_molecule_interaction(self, molecule_id: int):
+    def calculate_molecule_interaction(self, molecule_id: int, id_to_ignore: int = None):
         min_time = 0
         min_id = None
         is_border = True
-        for border_id in range(0, self.borders_count):
+        for border_id in range(-1, -self.borders_count - 1, -1):
             time = self.calculate_border_collision_time(molecule_id, border_id)
-            if time > self.time_since_start and (min_id is None or min_time > time):
+            if time > self.time_since_start and (min_id is None or min_time > time) and (not id_to_ignore == border_id):
                 min_time = time
                 min_id = border_id
 
@@ -112,7 +112,9 @@ class Simulation:
         d = b ** 2 - 4 * a * c
         solutions = np.concatenate([((-b-np.sqrt(d))/(2 * a)).reshape((self.molecules_count, 1)), ((-b+np.sqrt(d))/(2 * a)).reshape((self.molecules_count, 1))], axis=1)
         solutions[d <= 0, :] = 1e10
-        solutions[solutions < self.time_since_start + 1e-8] = 1e10
+        solutions[solutions < self.time_since_start] = 1e10
+        if id_to_ignore is not None and id_to_ignore >= 0:
+            solutions[id_to_ignore, :] = 1e10
         min_index = np.unravel_index(np.argmin(solutions, axis=None), solutions.shape)
         new_min = solutions[min_index]
         if new_min < min_time:
@@ -126,7 +128,7 @@ class Simulation:
                 min_time,
                 molecule_id,
                 self.molecules_history_id[molecule_id],
-                positive_index_to_negative(min_id, self.borders_count),
+                min_id,
                 self.borders_history_id[min_id]
             ))
         else:
@@ -141,7 +143,7 @@ class Simulation:
 
     def synch_molecule_pair(self, molecule_initiator_id: int, ignore_pair: int = -1):
         paired_id = self.molecules_expected_pair[molecule_initiator_id]
-        if not paired_id == -1 and self.molecules_expected_pair[paired_id] == molecule_initiator_id and not paired_id == ignore_pair:
+        if (not paired_id == -1) and self.molecules_expected_pair[paired_id] == molecule_initiator_id and (not paired_id == ignore_pair):
             self.molecules_expected_pair[paired_id] = -1
             self.calculate_molecule_interaction(paired_id)
 
@@ -151,15 +153,14 @@ class Simulation:
             new_velocity: np.ndarray[Tuple[Literal[3]],
             np.dtype[np.float64]],
             time_shift: float,
-            jump_value: float = 0,
-            paired_id: int = -1
+            pair_to_ignore: int = -1
     ):
-        self.molecules_pos[molecule_id] += self.molecules_vel[molecule_id] * time_shift + new_velocity * jump_value
+        self.molecules_pos[molecule_id] += self.molecules_vel[molecule_id] * time_shift
         self.molecules_vel[molecule_id] = new_velocity
         self.molecules_pos_time[molecule_id] += time_shift
         self.molecules_history_id[molecule_id] += 1
-        self.synch_molecule_pair(molecule_id, paired_id)
-        self.calculate_molecule_interaction(molecule_id)
+        self.synch_molecule_pair(molecule_id, pair_to_ignore)
+        self.calculate_molecule_interaction(molecule_id, pair_to_ignore)
 
     def force_molecule_speed(self, molecule_id: int, speed: float):
         self.update_molecule(molecule_id, polar_to_cartesian(speed, np.random.random() * 2 * np.pi, np.random.random() * np.pi).reshape(3,), 0)
@@ -202,6 +203,7 @@ class Simulation:
                 # one of them is a border
                 border_id = entity_id_1 if entity_id_1 < 0 else entity_id_2
                 molecule_id = entity_id_1 if entity_id_1 >= 0 else entity_id_2
+                print(f"border by {molecule_id} with {self.molecules_history_id[molecule_id]} at {interaction[0]}")
                 new_vel = one_sided_elastic_collision(
                     self.molecules_pos[molecule_id],
                     self.molecules_vel[molecule_id],
@@ -209,8 +211,9 @@ class Simulation:
                     self.borders_vel[border_id]
                     # TODO add support for border temperature here with enforcing speed
                 )
-                self.update_molecule(molecule_id, new_vel, time - self.molecules_pos_time[molecule_id], 1e-8)
+                self.update_molecule(molecule_id, new_vel, time - self.molecules_pos_time[molecule_id], pair_to_ignore=border_id)
             else:
+                print(f"molecules by {entity_id_1} {self.molecules_history_id[entity_id_1]} and {entity_id_2} {self.molecules_history_id[entity_id_2]} at {interaction[0]}")
                 # both are molecules
                 new_vel_1, new_vel_2 = elastic_balls_interaction(
                     self.molecules_pos[entity_id_1],
@@ -221,10 +224,19 @@ class Simulation:
                     self.molecules_weight[entity_id_2],
                 )
                 # print(f"Distance is {np.linalg.norm(self.molecules_pos[0] - self.molecules_pos[1])}")
-                self.update_molecule(entity_id_1, new_vel_1, time - self.molecules_pos_time[entity_id_1], 1e-8, entity_id_2)
-                self.update_molecule(entity_id_2, new_vel_2, time - self.molecules_pos_time[entity_id_2], 1e-8, entity_id_1)
+                self.update_molecule(entity_id_1, new_vel_1, time - self.molecules_pos_time[entity_id_1], pair_to_ignore=entity_id_2)
+                self.update_molecule(entity_id_2, new_vel_2, time - self.molecules_pos_time[entity_id_2], pair_to_ignore=entity_id_1)
         # print(f"Distance is {np.linalg.norm(self.molecules_pos[0] - self.molecules_pos[1])}")
-        # print(self.interaction_queue.qsize())
+        # present_0 = False
+        # present_1 = False
+        # for elem in self.interaction_queue.queue:
+        #     if (elem[1] == 0 and elem[2] == self.molecules_history_id[0]) or (elem[3] == 0 and elem[4] == self.molecules_history_id[0]):
+        #         present_0 = True
+        #     if (elem[1] == 1 and elem[2] == self.molecules_history_id[1]) or (elem[3] == 1 and elem[4] == self.molecules_history_id[1]):
+        #         present_1 = True
+        # if not present_0 or not present_1:
+        #     print("Error")
+        # print("Iteration")
 
     def get_current_positions(self):
         return self.molecules_pos + self.molecules_vel * ((self.time_since_start - self.molecules_pos_time)[:, np.newaxis])
