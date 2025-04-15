@@ -92,12 +92,13 @@ class Simulation:
         )
 
     def calculate_molecule_interaction(self, molecule_id: int, id_to_ignore: int = None):
+        cutoff_time = self.time_since_start # self.molecules_pos_time[molecule_id] - 1e-8
         min_time = 0
         min_id = None
         is_border = True
         for border_id in range(-1, -self.borders_count - 1, -1):
             time = self.calculate_border_collision_time(molecule_id, border_id)
-            if time > self.time_since_start and (min_id is None or min_time > time) and (not id_to_ignore == border_id):
+            if time > cutoff_time and (min_id is None or min_time > time) and (not id_to_ignore == border_id):
                 min_time = time
                 min_id = border_id
 
@@ -112,7 +113,7 @@ class Simulation:
         d = b ** 2 - 4 * a * c
         solutions = np.concatenate([((-b-np.sqrt(d))/(2 * a)).reshape((self.molecules_count, 1)), ((-b+np.sqrt(d))/(2 * a)).reshape((self.molecules_count, 1))], axis=1)
         solutions[d <= 0, :] = 1e10
-        solutions[solutions < self.time_since_start] = 1e10
+        solutions[solutions < cutoff_time] = 1e10
         if id_to_ignore is not None and id_to_ignore >= 0:
             solutions[id_to_ignore, :] = 1e10
         min_index = np.unravel_index(np.argmin(solutions, axis=None), solutions.shape)
@@ -154,7 +155,7 @@ class Simulation:
     ):
         self.molecules_pos[molecule_id] += self.molecules_vel[molecule_id] * time_shift
         self.molecules_vel[molecule_id] = new_velocity
-        self.molecules_pos_time[molecule_id] += time_shift
+        self.molecules_pos_time[molecule_id] = self.time_since_start
         self.molecules_history_id[molecule_id] += 1
         self.synch_molecule_pair(molecule_id, pair_to_ignore)
         self.calculate_molecule_interaction(molecule_id, pair_to_ignore)
@@ -201,7 +202,7 @@ class Simulation:
                 # one of them is a border
                 border_id = entity_id_1 if entity_id_1 < 0 else entity_id_2
                 molecule_id = entity_id_1 if entity_id_1 >= 0 else entity_id_2
-                print(f"border by {molecule_id} with {self.molecules_history_id[molecule_id]} at {interaction[0]}")
+                print(f"border {border_id} by {molecule_id} with {self.molecules_history_id[molecule_id]} at {interaction[0]}")
                 new_vel = one_sided_elastic_collision(
                     self.molecules_pos[molecule_id],
                     self.molecules_vel[molecule_id],
