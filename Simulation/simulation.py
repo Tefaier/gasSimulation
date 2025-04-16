@@ -2,14 +2,18 @@ from typing import Tuple, Any, Literal
 
 import numpy as np
 from queue import PriorityQueue
+from tqdm import tqdm
+import warnings
 
 from Simulation.models import Axis
 from Simulation.utils import polar_to_cartesian, elastic_balls_interaction, one_sided_elastic_collision, \
     positive_index_to_negative, cartesian_product, boltzmann_constant
 
+warnings.filterwarnings('ignore', category=RuntimeWarning)
 
 class Simulation:
     time_since_start: float
+    initial_volume: float
 
     molecules_count: int
     molecules_radius: np.ndarray[Any, np.dtype[np.float64]]
@@ -42,30 +46,39 @@ class Simulation:
     def __init__(self, n: int, molecule_radius: float, molecules_weight: float, initial_max_speed: float, initial_volume: float):
         self.molecules_count = n
         self.time_since_start = 0
+        self.initial_volume = initial_volume
         side_length = initial_volume ** (1/3)
         self.init_molecules(molecule_radius, molecules_weight, side_length * 0.5 - molecule_radius * 1.1, initial_max_speed)
         self.init_borders(side_length / 2)
         self.interaction_queue = PriorityQueue()
+        print("Start of calculating initial interactions")
+        bar = tqdm(total = n, ncols=100)
         for molecule_id in range(0, n):
             self.calculate_molecule_interaction(molecule_id)
+            bar.update()
+        bar.close()
 
     def validate_positions(self) -> bool:
         for molecule_id in range(0, self.molecules_count):
-            radius_total = (self.molecules_radius + self.molecules_radius[molecule_id]) ** 2
-            distances = np.sum((self.molecules_pos - self.molecules_pos[molecule_id][np.newaxis, :]) ** 2, axis=1)
-            difference = distances - radius_total
-            difference[molecule_id] = 1
-            if np.min(difference) < 0:
+            diff = np.sum((self.molecules_pos - self.molecules_pos[molecule_id][np.newaxis, :]) ** 2, axis=1) - (self.molecules_radius + self.molecules_radius[molecule_id]) ** 2
+            diff[molecule_id] = 1
+            if np.min(diff) < 0:
                 return False
         return True
 
     def init_molecules(self, radius: float, weight: float, max_offset: float, max_speed: float):
         self.molecules_radius = np.ones(shape=(self.molecules_count,)) * radius
         self.molecules_weight = np.ones(shape=(self.molecules_count,)) * weight
+        total_volume = np.sum(np.power(self.molecules_radius, 3) * np.pi * 4 / 3)
+        print(f"Initiated volume {self.initial_volume}, molecules total volume {total_volume} = {100 * total_volume / self.initial_volume}%")
+        counter = 0
         while True:
             self.molecules_pos = np.random.rand(self.molecules_count, 3) * 2 * max_offset - max_offset
+            counter += 1
             if self.validate_positions():
                 break
+            print(f"Attempt {counter}: failed to generate positions of molecules")
+        print(f"Attempt {counter}: positions of molecules successfully generated")
         self.molecules_vel = polar_to_cartesian(
             np.random.rand(self.molecules_count) * max_speed,
             np.random.rand(self.molecules_count) * 2 * np.pi,
@@ -191,6 +204,11 @@ class Simulation:
                     self.borders_history_id[border_id]
                 ))
 
+    # temperature in Kelvins
+    # if None than it will stop affecting molecules
+    def force_border_temperature(self, border_id: int, K: float | None):
+        self.borders_temperature[border_id] = K
+
     def set_border_temperature(self, border_id: int, temperature: float):
         self.borders_temperature[border_id] = temperature
 
@@ -212,17 +230,18 @@ class Simulation:
                 # one of them is a border
                 border_id = entity_id_1 if entity_id_1 < 0 else entity_id_2
                 molecule_id = entity_id_1 if entity_id_1 >= 0 else entity_id_2
-                print(f"border {border_id} by {molecule_id} with {self.molecules_history_id[molecule_id]} at {interaction[0]}")
+                # print(f"border {border_id} by {molecule_id} with {self.molecules_history_id[molecule_id]} at {interaction[0]}")
                 temp = self.borders_temperature[border_id]
                 new_vel = one_sided_elastic_collision(
                     self.molecules_vel[molecule_id],
                     self.borders_normal[border_id].value.normal * (-1 if border_id % 2 == 1 else 1),
                     self.borders_vel[border_id] * (-1 if border_id % 2 == 1 else 1),
+                    # TODO find formula for speed based on temperature, for now speed values seem too big, like 20 m/s for T=1K
                     None if temp is None else (np.sqrt(3 * boltzmann_constant * temp / self.molecules_weight[border_id]))
                 )
                 self.update_molecule(molecule_id, new_vel, time - self.molecules_pos_time[molecule_id], pair_to_ignore=border_id)
             else:
-                print(f"molecules by {entity_id_1} {self.molecules_history_id[entity_id_1]} and {entity_id_2} {self.molecules_history_id[entity_id_2]} at {interaction[0]}")
+                # print(f"molecules by {entity_id_1} {self.molecules_history_id[entity_id_1]} and {entity_id_2} {self.molecules_history_id[entity_id_2]} at {interaction[0]}")
                 # both are molecules
                 new_vel_1, new_vel_2 = elastic_balls_interaction(
                     self.molecules_pos[entity_id_1],
