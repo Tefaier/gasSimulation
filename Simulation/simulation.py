@@ -1,3 +1,4 @@
+import math
 from typing import Tuple, Any, Literal
 
 import numpy as np
@@ -14,6 +15,7 @@ warnings.filterwarnings('ignore', category=RuntimeWarning)
 class Simulation:
     time_since_start: float
     initial_volume: float
+    random_initial_pos: bool
 
     molecules_count: int
     molecules_radius: np.ndarray[Any, np.dtype[np.float64]]
@@ -46,6 +48,7 @@ class Simulation:
 
 
     def __init__(self, n: int, molecule_radius: float, molecules_weight: float, initial_max_speed: float, initial_volume: float):
+        self.random_initial_pos = False
         self.molecules_count = n
         self.time_since_start = 0
         self.initial_volume = initial_volume
@@ -74,12 +77,23 @@ class Simulation:
         total_volume = np.sum(np.power(self.molecules_radius, 3) * np.pi * 4 / 3)
         print(f"Initiated volume {self.initial_volume}, molecules total volume {total_volume} = {100 * total_volume / self.initial_volume}%")
         counter = 0
-        while True:
-            self.molecules_pos = np.random.rand(self.molecules_count, 3) * 2 * max_offset - max_offset
-            counter += 1
-            if self.validate_positions():
-                break
-            print(f"Attempt {counter}: failed to generate positions of molecules")
+        if self.random_initial_pos:
+            while True:
+                self.molecules_pos = np.random.rand(self.molecules_count, 3) * 2 * max_offset - max_offset
+                counter += 1
+                if self.validate_positions():
+                    break
+                print(f"Attempt {counter}: failed to generate positions of molecules")
+        else:
+            per_axis = math.ceil(self.molecules_count ** (1/3))
+            xv, yv, zv = np.meshgrid(
+                np.linspace(-max_offset, max_offset, per_axis),
+                np.linspace(-max_offset, max_offset, per_axis),
+                np.linspace(-max_offset, max_offset, per_axis)
+            )
+            self.molecules_pos = np.concatenate([xv.reshape(per_axis, per_axis, per_axis, 1), yv.reshape(per_axis, per_axis, per_axis, 1), zv.reshape(per_axis, per_axis, per_axis, 1)], axis=3).reshape((per_axis * per_axis * per_axis, 3))[:self.molecules_count]
+            if not self.validate_positions():
+                raise RuntimeError("Failed to use order generation for positions")
         print(f"Attempt {counter}: positions of molecules successfully generated")
         self.molecules_vel = polar_to_cartesian(
             np.random.rand(self.molecules_count) * max_speed,
