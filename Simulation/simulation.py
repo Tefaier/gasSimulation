@@ -33,6 +33,8 @@ class Simulation:
     borders_history_id: list[int]
     borders_temperature: list[float | None]
 
+    last_iteration_border_momentum_effect: float
+
     #  object inside is as follows:
     #  time of interaction
     #  id of first interacting entity
@@ -219,6 +221,7 @@ class Simulation:
             return self.molecules_history_id[entity_id] == history_id
 
     def make_iteration(self):
+        self.last_iteration_border_momentum_effect = 0
         interaction = self.interaction_queue.get()
         time = interaction[0]
         self.time_since_start = time
@@ -236,9 +239,9 @@ class Simulation:
                     self.molecules_vel[molecule_id],
                     self.borders_normal[border_id].value.normal * (-1 if border_id % 2 == 1 else 1),
                     self.borders_vel[border_id] * (-1 if border_id % 2 == 1 else 1),
-                    # TODO find formula for speed based on temperature, for now speed values seem too big, like 20 m/s for T=1K
                     None if temp is None else (np.sqrt(3 * boltzmann_constant * temp / self.molecules_weight[border_id]))
                 )
+                self.last_iteration_border_momentum_effect = np.linalg.norm(self.molecules_vel[molecule_id] - new_vel) * self.molecules_weight[molecule_id]
                 self.update_molecule(molecule_id, new_vel, time - self.molecules_pos_time[molecule_id], pair_to_ignore=border_id)
             else:
                 # print(f"molecules by {entity_id_1} {self.molecules_history_id[entity_id_1]} and {entity_id_2} {self.molecules_history_id[entity_id_2]} at {interaction[0]}")
