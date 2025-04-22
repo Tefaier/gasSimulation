@@ -47,13 +47,13 @@ class Simulation:
 
 
 
-    def __init__(self, n: int, molecule_radius: float, molecules_weight: float, initial_max_speed: float, initial_volume: float):
+    def __init__(self, n: int, molecule_radius: float, molecules_weight: float, initial_speed: float, initial_volume: float):
         self.random_initial_pos = False
         self.molecules_count = n
         self.time_since_start = 0
         self.initial_volume = initial_volume
         side_length = initial_volume ** (1/3)
-        self.init_molecules(molecule_radius, molecules_weight, side_length * 0.5 - molecule_radius * 1.1, initial_max_speed)
+        self.init_molecules(molecule_radius, molecules_weight, side_length * 0.5 - molecule_radius * 1.1, initial_speed)
         self.init_borders(side_length / 2)
         self.interaction_queue = PriorityQueue()
         print("Start of calculating initial interactions")
@@ -71,7 +71,7 @@ class Simulation:
                 return False
         return True
 
-    def init_molecules(self, radius: float, weight: float, max_offset: float, max_speed: float):
+    def init_molecules(self, radius: float, weight: float, max_offset: float, start_speed: float):
         self.molecules_radius = np.ones(shape=(self.molecules_count,)) * radius
         self.molecules_weight = np.ones(shape=(self.molecules_count,)) * weight
         total_volume = np.sum(np.power(self.molecules_radius, 3) * np.pi * 4 / 3)
@@ -96,7 +96,7 @@ class Simulation:
                 raise RuntimeError("Failed to use order generation for positions")
         print(f"Attempt {counter}: positions of molecules successfully generated")
         self.molecules_vel = polar_to_cartesian(
-            np.random.rand(self.molecules_count) * max_speed,
+            np.ones(shape=(self.molecules_count,)) * start_speed,
             np.random.rand(self.molecules_count) * 2 * np.pi,
             np.random.rand(self.molecules_count) * np.pi
         )
