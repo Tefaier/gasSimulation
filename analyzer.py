@@ -1,7 +1,9 @@
 import time
+import tqdm
 
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.animation as anim
 
 from Simulation.simulation import Simulation
 
@@ -46,19 +48,81 @@ class GasSimulationAnalyzer:
         plt.show()
 
     @staticmethod
-    def calculate_pressure(container_volume, time_step, wall_collision_impulse):
-        pressure = wall_collision_impulse / (container_volume * time_step)
-        return pressure
+    def calculate_pressure(container_area, time_step, wall_collision_impulse):
+        return wall_collision_impulse / (container_area * time_step)
 
     def calculate_theoretic_pressure(self, n, pressure_area):
-        T = self.calculate_temperature()
-        return n * k_B * T / pressure_area
+        return n * k_B * self.calculate_temperature() / pressure_area
+
+    def calculate_total_energy(self):
+        return 0.5 * self.mass * np.sum(self.calculate_speeds() ** 2)
 
 
 def calculate_avg_vel_by_temperature(temp, mass):  # Kelvins
     avg_kinetic_energy = 3 * k_B * temp / 2
     avg_speed = np.sqrt(2 * avg_kinetic_energy / mass)
     return avg_speed
+
+# border heat up and show of total_energy, temperature, speed distribution, pressure
+def heat_up_demonstration(simulation: Simulation, analyzer: GasSimulationAnalyzer):
+    fig, (ax1, ax2) = plt.subplots(1, 2)
+    ims = []
+    V = []
+    P = []
+    T = []
+    E = []
+    X = []
+    iterations = 80000
+    update_at_iter = 1000
+    momentum = 0
+    last_display_time = 0
+    bar = tqdm.tqdm(total=iterations)
+    for i in range(iterations):
+        simulation.make_iteration()
+        momentum += simulation.last_iteration_border_momentum_effect
+        if i % update_at_iter == 0:
+            P.append(analyzer.calculate_pressure(simulation.get_current_area(), simulation.time_since_start - last_display_time, momentum))
+            V.append(simulation.get_current_volume())
+            T.append(analyzer.calculate_temperature())
+            E.append(analyzer.calculate_total_energy())
+            X.append(simulation.time_since_start)
+
+            speeds = analyzer.calculate_speeds()
+
+            # Гистограмма
+            ax1.hist(speeds, bins=50, density=True, alpha=0.6, color='g', label='Simulation Data')
+
+            # Теоретическое распределение
+            v = np.linspace(0, np.max(speeds) * 1.1, 1000)
+            a = np.sqrt(analyzer.mass / (2 * np.pi * k_B * T[-1]))
+            maxwell_dist = 4 * np.pi * (v ** 2) * (a ** 3) * np.exp(- (analyzer.mass * v ** 2) / (2 * k_B * T[-1]))
+            ax1.plot(v, maxwell_dist, 'r-', label='Maxwell Distribution')
+            ax1.subtitle(f'Speed Distribution (T = {T[-1]:.2f} K)')
+            ax1.xlabel('Speed (m/s)')
+            ax1.ylabel('Probability Density')
+            ax1.legend()
+
+            ax2.plot(X, T)
+            ax2.subtitle('Temperature')
+            ax2.xlabel('Time, s')
+            ax2.ylabel('T, K')
+
+            momentum = 0
+            last_display_time = simulation.time_since_start
+        bar.update()
+    bar.close()
+    ani = anim.ArtistAnimation(fig, ims, interval=50, blit=True, repeat_delay=1000)
+    ani.save("heat_up.mp4")
+
+    fig = plt.figure(1, figsize=(9, 6))
+    plt.plot(V, P)
+    fig.savefig("VP.png")
+    fig = plt.figure(1, figsize=(9, 6))
+    plt.plot(P, T)
+    fig.savefig("PT.png")
+    fig = plt.figure(1, figsize=(9, 6))
+    plt.plot(V, T)
+    fig.savefig("VT.png")
 
 
 
@@ -73,9 +137,13 @@ if __name__ == "__main__":
     analyzer = GasSimulationAnalyzer(simulation, mass=weight)
 
     momentum = 0
-    for i in range(80000):
+    iterations = 80000
+    bar = tqdm.tqdm(total=iterations)
+    for i in range(iterations):
         simulation.make_iteration()
         momentum += simulation.last_iteration_border_momentum_effect
+        bar.update()
+    bar.close()
     analyzer.plot_speed_distribution(bins=50)
 
     cube_area = 6 * volume ** (2/3)

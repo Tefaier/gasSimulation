@@ -29,9 +29,9 @@ class Simulation:
 
     borders_count: int
     borders_normal: list[Axis] = [Axis.x, Axis.x, Axis.y, Axis.y, Axis.z, Axis.z]
-    borders_pos: list[float]
-    borders_vel: list[float]
-    borders_pos_time: list[float]
+    borders_pos: np.ndarray[Any, np.dtype[np.float64]]
+    borders_vel: np.ndarray[Any, np.dtype[np.float64]]
+    borders_pos_time: np.ndarray[Any, np.dtype[np.float64]]
     borders_history_id: list[int]
     borders_temperature: list[float | None]
 
@@ -108,9 +108,9 @@ class Simulation:
     def init_borders(self, offset: float):
         self.borders_count = len(self.borders_normal)
 
-        self.borders_pos = [-offset, offset] * 3
-        self.borders_vel = [0] * self.borders_count
-        self.borders_pos_time = [0] * self.borders_count
+        self.borders_pos = np.array([-offset, offset] * 3)
+        self.borders_vel = np.zeros((self.borders_count,))
+        self.borders_pos_time = np.zeros((self.borders_count,))
         self.borders_history_id = [0] * self.borders_count
         self.borders_temperature = [None] * self.borders_count
 
@@ -128,7 +128,7 @@ class Simulation:
         )
 
     def calculate_molecule_interaction(self, molecule_id: int, id_to_ignore: int = None):
-        cutoff_time = self.time_since_start # self.molecules_pos_time[molecule_id] - 1e-8
+        cutoff_time = self.molecules_pos_time[molecule_id] #- 1e-8
         min_time = 0
         min_id = None
         is_border = True
@@ -290,3 +290,20 @@ class Simulation:
 
     def get_current_positions(self):
         return self.molecules_pos + self.molecules_vel * ((self.time_since_start - self.molecules_pos_time)[:, np.newaxis])
+
+    def get_current_border_positions(self):
+        return self.borders_pos + self.borders_vel * ((self.time_since_start - self.borders_pos_time)[:, np.newaxis])
+
+    def get_current_volume(self):
+        positions = self.get_current_border_positions()
+        side1 = positions[1] - positions[0]
+        side2 = positions[3] - positions[2]
+        side3 = positions[5] - positions[4]
+        return side1 * side2 * side3
+
+    def get_current_area(self):
+        positions = self.get_current_border_positions()
+        side1 = positions[1] - positions[0]
+        side2 = positions[3] - positions[2]
+        side3 = positions[5] - positions[4]
+        return 2 * (side1 * side2 + side2 * side3 + side1 * side3)
