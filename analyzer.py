@@ -65,64 +65,85 @@ def calculate_avg_vel_by_temperature(temp, mass):  # Kelvins
 
 # border heat up and show of total_energy, temperature, speed distribution, pressure
 def heat_up_demonstration(simulation: Simulation, analyzer: GasSimulationAnalyzer):
-    fig, (ax1, ax2) = plt.subplots(1, 2)
-    ims = []
+    fig = plt.figure(figsize=(8, 8))
+    ax1 = fig.add_subplot(1, 2, 1)
+    ax2 = fig.add_subplot(1, 2, 2)
     V = []
     P = []
     T = []
     E = []
     X = []
-    iterations = 80000
+    iterations = 100000
     update_at_iter = 1000
     momentum = 0
     last_display_time = 0
-    bar = tqdm.tqdm(total=iterations)
-    for i in range(iterations):
-        simulation.make_iteration()
-        momentum += simulation.last_iteration_border_momentum_effect
-        if i % update_at_iter == 0:
-            P.append(analyzer.calculate_pressure(simulation.get_current_area(), simulation.time_since_start - last_display_time, momentum))
-            V.append(simulation.get_current_volume())
-            T.append(analyzer.calculate_temperature())
-            E.append(analyzer.calculate_total_energy())
-            X.append(simulation.time_since_start)
+    iteration = 0
+    bar = tqdm.tqdm(total=iterations, ncols=100)
 
-            speeds = analyzer.calculate_speeds()
+    def init():
+        return []
+    def run_frame(frame):
+        nonlocal momentum, last_display_time, iteration, bar
+        ax1.cla()
+        ax2.cla()
+        for i in range(update_at_iter):
+            simulation.make_iteration()
+            momentum += simulation.last_iteration_border_momentum_effect
+            iteration += 1
+            bar.update()
+        fig.suptitle(f"Iteration: {iteration}\nTime: {simulation.time_since_start} s")
+        P.append(analyzer.calculate_pressure(simulation.get_current_area(), simulation.time_since_start - last_display_time, momentum))
+        V.append(simulation.get_current_volume())
+        T.append(analyzer.calculate_temperature())
+        E.append(analyzer.calculate_total_energy())
+        X.append(simulation.time_since_start)
 
-            # Гистограмма
-            ax1.hist(speeds, bins=50, density=True, alpha=0.6, color='g', label='Simulation Data')
+        speeds = analyzer.calculate_speeds()
 
-            # Теоретическое распределение
-            v = np.linspace(0, np.max(speeds) * 1.1, 1000)
-            a = np.sqrt(analyzer.mass / (2 * np.pi * k_B * T[-1]))
-            maxwell_dist = 4 * np.pi * (v ** 2) * (a ** 3) * np.exp(- (analyzer.mass * v ** 2) / (2 * k_B * T[-1]))
-            ax1.plot(v, maxwell_dist, 'r-', label='Maxwell Distribution')
-            ax1.subtitle(f'Speed Distribution (T = {T[-1]:.2f} K)')
-            ax1.xlabel('Speed (m/s)')
-            ax1.ylabel('Probability Density')
-            ax1.legend()
+        # Гистограмма
+        try:
+            _, _, line1 = ax1.hist(speeds, bins=50, density=True, alpha=0.6, color='g', label='Simulation Data')
+        except ValueError:
+            _, _, line1 = ax1.hist(speeds, bins=1, density=True, alpha=0.6, color='g', label='Simulation Data')
 
-            ax2.plot(X, T)
-            ax2.subtitle('Temperature')
-            ax2.xlabel('Time, s')
-            ax2.ylabel('T, K')
+        # Теоретическое распределение
+        v = np.linspace(0, np.max(speeds) * 1.1, 1000)
+        a = np.sqrt(analyzer.mass / (2 * np.pi * k_B * T[-1]))
+        maxwell_dist = 4 * np.pi * (v ** 2) * (a ** 3) * np.exp(- (analyzer.mass * v ** 2) / (2 * k_B * T[-1]))
+        line2, = ax1.plot(v, maxwell_dist, 'r-', label='Maxwell Distribution')
+        ax1.set_title(f'Speed Distribution (T = {T[-1]:.2f} K)')
+        ax1.set_xlabel('Speed (m/s)')
+        ax1.set_ylabel('Probability Density')
+        ax1.legend()
 
-            momentum = 0
-            last_display_time = simulation.time_since_start
-        bar.update()
-    bar.close()
-    ani = anim.ArtistAnimation(fig, ims, interval=50, blit=True, repeat_delay=1000)
+        line3, = ax2.plot(X, T)
+        ax2.set_title('Temperature')
+        ax2.set_xlabel('Time, s')
+        ax2.set_ylabel('T, K')
+
+        momentum = 0
+        last_display_time = simulation.time_since_start
+        return [*line1.patches, line2, line3]
+
+    ani = anim.FuncAnimation(fig, run_frame, init_func=init, frames=int(iterations / update_at_iter), interval=200, blit=False)
     ani.save("heat_up.mp4")
+    bar.close()
 
-    fig = plt.figure(1, figsize=(9, 6))
-    plt.plot(V, P)
-    fig.savefig("VP.png")
-    fig = plt.figure(1, figsize=(9, 6))
-    plt.plot(P, T)
-    fig.savefig("PT.png")
-    fig = plt.figure(1, figsize=(9, 6))
-    plt.plot(V, T)
-    fig.savefig("VT.png")
+    plt.figure(2, figsize=(9, 6))
+    plt.scatter(V, P, s=np.linspace(0, 20, len(V)))
+    plt.xlabel("V, m^3")
+    plt.ylabel("P, Pascal")
+    plt.savefig("VP.png")
+    plt.figure(3, figsize=(9, 6))
+    plt.scatter(P, T, s=np.linspace(0, 20, len(V)))
+    plt.xlabel("P, Pascal")
+    plt.ylabel("T, K")
+    plt.savefig("PT.png")
+    plt.figure(4, figsize=(9, 6))
+    plt.scatter(V, T, s=np.linspace(0, 20, len(V)))
+    plt.xlabel("V, m^3")
+    plt.ylabel("T, K")
+    plt.savefig("VT.png")
 
 
 

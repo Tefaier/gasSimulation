@@ -5,10 +5,11 @@ import numpy as np
 from queue import PriorityQueue
 from tqdm import tqdm
 import warnings
+from numba import njit
 
 from Simulation.models import Axis
 from Simulation.utils import polar_to_cartesian, elastic_balls_interaction, one_sided_elastic_collision, \
-    positive_index_to_negative, cartesian_product, boltzmann_constant
+    positive_index_to_negative, boltzmann_constant
 
 warnings.filterwarnings('ignore', category=RuntimeWarning)
 
@@ -63,10 +64,11 @@ class Simulation:
             bar.update()
         bar.close()
 
-    def validate_positions(self) -> bool:
-        for molecule_id in range(0, self.molecules_count):
-            diff = np.sum((self.molecules_pos - self.molecules_pos[molecule_id][np.newaxis, :]) ** 2, axis=1) - (self.molecules_radius + self.molecules_radius[molecule_id]) ** 2
-            diff[molecule_id] = 1
+    @staticmethod
+    @njit(nopython=True)
+    def validate_positions(pos_all, rad_all, count) -> bool:
+        for molecule_id in range(0, count - 1):
+            diff = np.sum((pos_all[molecule_id+1:] - pos_all[molecule_id][np.newaxis, :]) ** 2, axis=1) - (rad_all[molecule_id+1:] + rad_all[molecule_id]) ** 2
             if np.min(diff) < 0:
                 return False
         return True
@@ -81,7 +83,7 @@ class Simulation:
             while True:
                 self.molecules_pos = np.random.rand(self.molecules_count, 3) * 2 * max_offset - max_offset
                 counter += 1
-                if self.validate_positions():
+                if Simulation.validate_positions(self.molecules_pos, self.molecules_radius, self.molecules_count):
                     break
                 print(f"Attempt {counter}: failed to generate positions of molecules")
         else:
@@ -92,7 +94,7 @@ class Simulation:
                 np.linspace(-max_offset, max_offset, per_axis)
             )
             self.molecules_pos = np.concatenate([xv.reshape(per_axis, per_axis, per_axis, 1), yv.reshape(per_axis, per_axis, per_axis, 1), zv.reshape(per_axis, per_axis, per_axis, 1)], axis=3).reshape((per_axis * per_axis * per_axis, 3))[:self.molecules_count]
-            if not self.validate_positions():
+            if not Simulation.validate_positions(self.molecules_pos, self.molecules_radius, self.molecules_count):
                 raise RuntimeError("Failed to use order generation for positions")
         print(f"Attempt {counter}: positions of molecules successfully generated")
         self.molecules_vel = polar_to_cartesian(
@@ -127,7 +129,44 @@ class Simulation:
                 / speed_diff
         )
 
-    def calculate_molecule_interaction(self, molecule_id: int, id_to_ignore: int = None):
+    @staticmethod
+    @njit(nopython=True, cache=False)
+    def calculate_molecule_interaction_with_m(pos_all, vel_all, rad_all, time_all, molecule_id, cutoff, count, to_ignore):
+        m_cutoff = cutoff * 1.00000001
+        pos = pos_all[molecule_id]
+        vel = vel_all[molecule_id]
+        rad = rad_all[molecule_id]
+        time = time_all[molecule_id]
+
+        # a * t**2 + b * t + c = 0
+        vel_diff = vel[np.newaxis, :] - vel_all
+        pos_diff = pos_all - pos[np.newaxis, :] + time * vel[np.newaxis, :] - time_all[:, np.newaxis] * vel_all
+        a = np.sum(vel_diff ** 2, axis=1)
+        b = np.sum(-2 * vel_diff * pos_diff, axis=1)
+        c = np.sum(pos_diff ** 2, axis=1) - (rad + rad_all) ** 2
+        d = b ** 2 - 4 * a * c
+        valid = d > 0
+        sqrt_d = np.sqrt(np.where(valid, d, 0))
+        solution_1 = np.full((count,), float('inf'))
+        solution_2 = np.full((count,), float('inf'))
+        solution_1[valid] = (-b[valid] - sqrt_d[valid]) / (2 * a[valid])
+        solution_2[valid] = (-b[valid] + sqrt_d[valid]) / (2 * a[valid])
+        solution_1 = np.where(solution_1 <= m_cutoff, float('inf'), solution_1)
+        solution_2 = np.where(solution_2 <= m_cutoff, float('inf'), solution_2)
+        if to_ignore >= 0:
+            solution_1[to_ignore] = float('inf')
+            solution_2[to_ignore] = float('inf')
+
+        min_index_1 = np.argmin(solution_1)
+        new_min_1 = solution_1.flat[min_index_1]
+        min_index_2 = np.argmin(solution_2)
+        new_min_2 = solution_2.flat[min_index_2]
+        if new_min_1 < new_min_2:
+            return min_index_1, new_min_1
+        else:
+            return min_index_2, new_min_2
+
+    def old_call(self, molecule_id: int, id_to_ignore: int = None):
         cutoff_time = self.molecules_pos_time[molecule_id] #- 1e-8
         min_time = 0
         min_id = None
@@ -159,6 +198,36 @@ class Simulation:
             min_time = new_min
             min_id = min_index[0]
             is_border = False
+
+        return min_id, min_time, is_border
+
+    def calculate_molecule_interaction(self, molecule_id: int, id_to_ignore: int = None):
+        cutoff_time = self.molecules_pos_time[molecule_id] #- 1e-8
+
+        min_time = float('inf')
+        min_id = None
+        is_border = True
+        for border_id in range(-1, -self.borders_count - 1, -1):
+            time = self.calculate_border_collision_time(molecule_id, border_id)
+            if min_time > time > cutoff_time and id_to_ignore != border_id:
+                min_time = time
+                min_id = border_id
+
+        min_index, new_min = Simulation.calculate_molecule_interaction_with_m(
+            self.molecules_pos,
+            self.molecules_vel,
+            self.molecules_radius,
+            self.molecules_pos_time,
+            molecule_id,
+            cutoff_time,
+            self.molecules_count, id_to_ignore if id_to_ignore is not None else -1
+        )
+
+        if new_min < min_time:
+            min_time = new_min
+            min_id = min_index
+            is_border = False
+
         self.molecules_closest_interaction_time[molecule_id] = min_time
         self.molecules_queue_presence[molecule_id] += 1
         if is_border:
@@ -258,8 +327,8 @@ class Simulation:
                 self.last_iteration_border_momentum_effect = np.linalg.norm(self.molecules_vel[molecule_id] - new_vel) * self.molecules_weight[molecule_id]
                 self.update_molecule(molecule_id, new_vel, time - self.molecules_pos_time[molecule_id], pair_to_ignore=border_id)
             else:
-                # print(f"molecules by {entity_id_1} {self.molecules_history_id[entity_id_1]} and {entity_id_2} {self.molecules_history_id[entity_id_2]} at {interaction[0]}")
                 # both are molecules
+                # print(f"molecules by {entity_id_1} {self.molecules_history_id[entity_id_1]} and {entity_id_2} {self.molecules_history_id[entity_id_2]} at {interaction[0]}")
                 new_vel_1, new_vel_2 = elastic_balls_interaction(
                     self.molecules_pos[entity_id_1],
                     self.molecules_vel[entity_id_1],
@@ -268,7 +337,6 @@ class Simulation:
                     self.molecules_vel[entity_id_2],
                     self.molecules_weight[entity_id_2],
                 )
-                # print(f"Distance is {np.linalg.norm(self.molecules_pos[0] - self.molecules_pos[1])}")
                 self.update_molecule(entity_id_1, new_vel_1, time - self.molecules_pos_time[entity_id_1], pair_to_ignore=entity_id_2)
                 self.update_molecule(entity_id_2, new_vel_2, time - self.molecules_pos_time[entity_id_2], pair_to_ignore=entity_id_1)
         for id in [entity_id_1, entity_id_2]:
@@ -276,23 +344,12 @@ class Simulation:
                 self.molecules_queue_presence[id] -= 1
                 if self.molecules_queue_presence[id] == 0:
                     self.calculate_molecule_interaction(id)
-        # print(f"Distance is {np.linalg.norm(self.molecules_pos[0] - self.molecules_pos[1])}")
-        # present_0 = False
-        # present_1 = False
-        # for elem in self.interaction_queue.queue:
-        #     if (elem[1] == 0 and elem[2] == self.molecules_history_id[0]) or (elem[3] == 0 and elem[4] == self.molecules_history_id[0]):
-        #         present_0 = True
-        #     if (elem[1] == 1 and elem[2] == self.molecules_history_id[1]) or (elem[3] == 1 and elem[4] == self.molecules_history_id[1]):
-        #         present_1 = True
-        # if not present_0 or not present_1:
-        #     print("Error")
-        # print("Iteration")
 
     def get_current_positions(self):
         return self.molecules_pos + self.molecules_vel * ((self.time_since_start - self.molecules_pos_time)[:, np.newaxis])
 
     def get_current_border_positions(self):
-        return self.borders_pos + self.borders_vel * ((self.time_since_start - self.borders_pos_time)[:, np.newaxis])
+        return self.borders_pos + self.borders_vel * (self.time_since_start - self.borders_pos_time)
 
     def get_current_volume(self):
         positions = self.get_current_border_positions()
