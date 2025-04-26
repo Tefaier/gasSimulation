@@ -166,41 +166,6 @@ class Simulation:
         else:
             return min_index_2, new_min_2
 
-    def old_call(self, molecule_id: int, id_to_ignore: int = None):
-        cutoff_time = self.molecules_pos_time[molecule_id] #- 1e-8
-        min_time = 0
-        min_id = None
-        is_border = True
-        for border_id in range(-1, -self.borders_count - 1, -1):
-            time = self.calculate_border_collision_time(molecule_id, border_id)
-            # print(time * self.molecules_vel[molecule_id] + self.molecules_pos[molecule_id])
-            if time > cutoff_time and (min_id is None or min_time > time) and (not id_to_ignore == border_id):
-                min_time = time
-                min_id = border_id
-
-        pos = self.molecules_pos[molecule_id]
-        vel = self.molecules_vel[molecule_id]
-        rad = self.molecules_radius[molecule_id]
-        time = self.molecules_pos_time[molecule_id]
-        # a * t**2 + b * t + c = 0
-        a = np.sum((vel[np.newaxis, :] - self.molecules_vel) ** 2, axis=1)
-        b = np.sum(2 * (self.molecules_vel - vel[np.newaxis, :]) * (self.molecules_pos - pos[np.newaxis, :] + time * vel[np.newaxis, :] - self.molecules_pos_time[:, np.newaxis] * self.molecules_vel), axis=1)
-        c =  - ((rad + self.molecules_radius) ** 2) + np.sum((time * vel[np.newaxis, :] - self.molecules_pos_time[:, np.newaxis] * self.molecules_vel + self.molecules_pos - pos[np.newaxis, :])**2, axis=1)
-        d = b ** 2 - 4 * a * c
-        solutions = np.concatenate([((-b-np.sqrt(d))/(2 * a)).reshape((self.molecules_count, 1)), ((-b+np.sqrt(d))/(2 * a)).reshape((self.molecules_count, 1))], axis=1)
-        solutions[d <= 0, :] = 1e10
-        solutions[solutions < cutoff_time] = 1e10
-        if id_to_ignore is not None and id_to_ignore >= 0:
-            solutions[id_to_ignore, :] = 1e10
-        min_index = np.unravel_index(np.argmin(solutions, axis=None), solutions.shape)
-        new_min = solutions[min_index]
-        if new_min < min_time:
-            min_time = new_min
-            min_id = min_index[0]
-            is_border = False
-
-        return min_id, min_time, is_border
-
     def calculate_molecule_interaction(self, molecule_id: int, id_to_ignore: int = None):
         cutoff_time = self.molecules_pos_time[molecule_id] #- 1e-8
 
