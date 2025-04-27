@@ -65,7 +65,7 @@ class Simulation:
         bar.close()
 
     @staticmethod
-    @njit(nopython=True)
+    @njit(nopython=True, cache=True)
     def validate_positions(pos_all, rad_all, count) -> bool:
         for molecule_id in range(0, count - 1):
             diff = np.sum((pos_all[molecule_id+1:] - pos_all[molecule_id][np.newaxis, :]) ** 2, axis=1) - (rad_all[molecule_id+1:] + rad_all[molecule_id]) ** 2
@@ -130,7 +130,7 @@ class Simulation:
         )
 
     @staticmethod
-    @njit(nopython=True, cache=False)
+    @njit(nopython=True, cache=True)
     def calculate_molecule_interaction_with_m(pos_all, vel_all, rad_all, time_all, molecule_id, cutoff, count, to_ignore):
         m_cutoff = cutoff * 1.00000001
         pos = pos_all[molecule_id]
@@ -166,8 +166,8 @@ class Simulation:
         else:
             return min_index_2, new_min_2
 
-    def calculate_molecule_interaction(self, molecule_id: int, id_to_ignore: int = None):
-        cutoff_time = self.molecules_pos_time[molecule_id] #- 1e-8
+    def calculate_molecule_interaction(self, molecule_id: int, id_to_ignore: int = None, shift: float = 0):
+        cutoff_time = self.molecules_pos_time[molecule_id] + shift #- 1e-8
 
         min_time = float('inf')
         min_id = None
@@ -193,6 +193,9 @@ class Simulation:
             min_id = min_index
             is_border = False
 
+        if min_id is None:
+            print(f"Error in calculating interaction, backup protocol ignored, molecule with id: {molecule_id} is erased from queue")
+            return
         self.molecules_closest_interaction_time[molecule_id] = min_time
         self.molecules_queue_presence[molecule_id] += 1
         if is_border:
@@ -272,11 +275,11 @@ class Simulation:
         self.last_iteration_border_momentum_effect = 0
         interaction = self.interaction_queue.get()
         time = interaction[0]
-        self.time_since_start = time
         entity_id_1 = interaction[1]
         entity_id_2 = interaction[3]
         if self.validate_interaction(entity_id_1, interaction[2]) \
                 and self.validate_interaction(entity_id_2, interaction[4]):
+            self.time_since_start = max(self.time_since_start, time)
             if (entity_id_1 >= 0) ^ (entity_id_2 >= 0):
                 # one of them is a border
                 border_id = entity_id_1 if entity_id_1 < 0 else entity_id_2
@@ -287,7 +290,7 @@ class Simulation:
                     self.molecules_vel[molecule_id],
                     self.borders_normal[border_id].value.normal * (-1 if border_id % 2 == 1 else 1),
                     self.borders_vel[border_id] * (-1 if border_id % 2 == 1 else 1),
-                    None if temp is None else (np.sqrt(3 * boltzmann_constant * temp / self.molecules_weight[border_id]))
+                    None if temp is None else (np.sqrt(3 * boltzmann_constant * temp / self.molecules_weight[molecule_id]))
                 )
                 self.last_iteration_border_momentum_effect = np.linalg.norm(self.molecules_vel[molecule_id] - new_vel) * self.molecules_weight[molecule_id]
                 self.update_molecule(molecule_id, new_vel, time - self.molecules_pos_time[molecule_id], pair_to_ignore=border_id)
@@ -307,8 +310,12 @@ class Simulation:
         for id in [entity_id_1, entity_id_2]:
             if id >= 0:
                 self.molecules_queue_presence[id] -= 1
+                # pos = self.molecules_pos[id] + self.molecules_vel[id] * (self.time_since_start - self.molecules_pos_time[id])
+                # if pos[0] < self.borders_pos[0] or pos[0] > self.borders_pos[1] or pos[1] < self.borders_pos[2] or pos[1] > self.borders_pos[3] or pos[2] < self.borders_pos[4] or pos[2] > self.borders_pos[5]:
+                #     self.molecules_pos[id] = self.borders_pos[1:, 2] - self.borders_pos[:, 2]
                 if self.molecules_queue_presence[id] == 0:
                     self.calculate_molecule_interaction(id)
+
 
     def get_current_positions(self):
         return self.molecules_pos + self.molecules_vel * ((self.time_since_start - self.molecules_pos_time)[:, np.newaxis])

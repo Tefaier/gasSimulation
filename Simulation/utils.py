@@ -44,13 +44,15 @@ def elastic_balls_interaction(
         vel_2: np.ndarray[Tuple[Literal[3]], np.dtype[np.float64]],
         weight_2: float
 ) -> Tuple[np.ndarray[Tuple[Literal[3]], np.dtype[np.float64]], np.ndarray[Tuple[Literal[3]], np.dtype[np.float64]]]:
-    contact_normal = vec_normalize(pos_2 - pos_1)
-    m_reduced = 1 / (1 / weight_1 + 1 / weight_2)
-    impact_vel = np.dot(contact_normal, vel_1 - vel_2)
-    impulse_shift = 2 * m_reduced * impact_vel
-    new_vel_1 = vel_1 - impulse_shift * contact_normal / weight_1
-    new_vel_2 = vel_2 + impulse_shift * contact_normal / weight_2
-    # print(f"Energy before {weight_1 * (np.linalg.norm(vel_1)**2) + weight_2*(np.linalg.norm(vel_2)**2)} after {weight_1 * (np.linalg.norm(new_vel_1)**2) + weight_2*(np.linalg.norm(new_vel_2)**2)}")
+    contact_normal = vec_normalize(pos_1 - pos_2)
+    v_normal = np.dot(vel_1 - vel_2, contact_normal) * contact_normal
+    new_vel_1 = vel_1 - v_normal * 2 * weight_2 / (weight_1 + weight_2)
+    new_vel_2 = vel_2 + v_normal * 2 * weight_1 / (weight_1 + weight_2)
+    # m_reduced = 1 / (1 / weight_1 + 1 / weight_2)
+    # impact_vel = np.dot(contact_normal, vel_1 - vel_2)
+    # impulse_shift = 2 * m_reduced * impact_vel
+    # new_vel_1 = vel_1 - impulse_shift * contact_normal / weight_1
+    # new_vel_2 = vel_2 + impulse_shift * contact_normal / weight_2
     return new_vel_1, new_vel_2
 
 def one_sided_elastic_collision(

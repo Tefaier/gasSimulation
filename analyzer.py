@@ -63,9 +63,8 @@ def calculate_avg_vel_by_temperature(temp, mass):  # Kelvins
     avg_speed = np.sqrt(2 * avg_kinetic_energy / mass)
     return avg_speed
 
-# border heat up and show of total_energy, temperature, speed distribution, pressure
-def heat_up_demonstration(simulation: Simulation, analyzer: GasSimulationAnalyzer):
-    fig = plt.figure(figsize=(8, 8))
+def default_demonstration(simulation: Simulation, analyzer: GasSimulationAnalyzer):
+    fig = plt.figure(figsize=(16, 8))
     ax1 = fig.add_subplot(1, 2, 1)
     ax2 = fig.add_subplot(1, 2, 2)
     V = []
@@ -73,8 +72,95 @@ def heat_up_demonstration(simulation: Simulation, analyzer: GasSimulationAnalyze
     T = []
     E = []
     X = []
-    iterations = 100000
-    update_at_iter = 1000
+    iterations = 400000
+    update_at_iter = 4000  # 1000, 4000, 10000
+    momentum = 0
+    last_display_time = 0
+    iteration = 0
+    bar = tqdm.tqdm(total=iterations, ncols=100)
+
+    def init():
+        return []
+
+    def run_frame(frame):
+        nonlocal momentum, last_display_time, iteration, bar
+        ax1.cla()
+        ax2.cla()
+        for i in range(update_at_iter):
+            simulation.make_iteration()
+            momentum += simulation.last_iteration_border_momentum_effect
+            iteration += 1
+            bar.update()
+        fig.suptitle(f"Iteration: {iteration}\nTime: {simulation.time_since_start} s")
+        P.append(
+            analyzer.calculate_pressure(simulation.get_current_area(), simulation.time_since_start - last_display_time,
+                                        momentum))
+        V.append(simulation.get_current_volume())
+        T.append(analyzer.calculate_temperature())
+        E.append(analyzer.calculate_total_energy())
+        X.append(simulation.time_since_start)
+
+        speeds = analyzer.calculate_speeds()
+
+        # Гистограмма
+        try:
+            _, _, line1 = ax1.hist(speeds, bins=50, density=True, alpha=0.6, color='g', label='Simulation Data')
+        except ValueError:
+            _, _, line1 = ax1.hist(speeds, bins=1, density=True, alpha=0.6, color='g', label='Simulation Data')
+
+        # Теоретическое распределение
+        v = np.linspace(0, np.max(speeds) * 1.1, 1000)
+        a = np.sqrt(analyzer.mass / (2 * np.pi * k_B * T[-1]))
+        maxwell_dist = 4 * np.pi * (v ** 2) * (a ** 3) * np.exp(- (analyzer.mass * v ** 2) / (2 * k_B * T[-1]))
+        line2, = ax1.plot(v, maxwell_dist, 'r-', label='Maxwell Distribution')
+        ax1.set_title(f'Speed Distribution (T = {T[-1]:.2f} K)')
+        ax1.set_xlabel('Speed (m/s)')
+        ax1.set_ylabel('Probability Density')
+        ax1.legend()
+
+        line3, = ax2.plot(X, T)
+        ax2.set_title('Temperature')
+        ax2.set_xlabel('Time, s')
+        ax2.set_ylabel('T, K')
+
+        momentum = 0
+        last_display_time = simulation.time_since_start
+        return [*line1.patches, line2, line3]
+
+    ani = anim.FuncAnimation(fig, run_frame, init_func=init, frames=int(iterations / update_at_iter), interval=200,
+                             blit=False)
+    ani.save("heat_up.mp4")
+    bar.close()
+
+    plt.figure(2, figsize=(9, 6))
+    plt.scatter(V, P, s=np.linspace(5, 20, len(V)))
+    plt.xlabel("V, m^3")
+    plt.ylabel("P, Pascal")
+    plt.savefig("VP.png")
+    plt.figure(3, figsize=(9, 6))
+    plt.scatter(P, T, s=np.linspace(5, 20, len(V)))
+    plt.xlabel("P, Pascal")
+    plt.ylabel("T, K")
+    plt.savefig("PT.png")
+    plt.figure(4, figsize=(9, 6))
+    plt.scatter(V, T, s=np.linspace(5, 20, len(V)))
+    plt.xlabel("V, m^3")
+    plt.ylabel("T, K")
+    plt.savefig("VT.png")
+
+
+# border heat up and show of total_energy, temperature, speed distribution, pressure
+def heat_up_demonstration(simulation: Simulation, analyzer: GasSimulationAnalyzer):
+    fig = plt.figure(figsize=(16, 8))
+    ax1 = fig.add_subplot(1, 2, 1)
+    ax2 = fig.add_subplot(1, 2, 2)
+    V = []
+    P = []
+    T = []
+    E = []
+    X = []
+    iterations = 2500000
+    update_at_iter = 4000 # 1000, 4000, 10000
     momentum = 0
     last_display_time = 0
     iteration = 0
@@ -91,6 +177,17 @@ def heat_up_demonstration(simulation: Simulation, analyzer: GasSimulationAnalyze
             momentum += simulation.last_iteration_border_momentum_effect
             iteration += 1
             bar.update()
+            if iteration == 400000:
+                simulation.force_border_temperature(1, 800)
+            if iteration == 1500000:
+                simulation.force_border_temperature(1, None)
+            if iteration == 1800000:
+                simulation.force_border_temperature(0, 200)
+                simulation.force_border_temperature(1, 200)
+                simulation.force_border_temperature(2, 200)
+                simulation.force_border_temperature(3, 200)
+                simulation.force_border_temperature(4, 200)
+                simulation.force_border_temperature(5, 200)
         fig.suptitle(f"Iteration: {iteration}\nTime: {simulation.time_since_start} s")
         P.append(analyzer.calculate_pressure(simulation.get_current_area(), simulation.time_since_start - last_display_time, momentum))
         V.append(simulation.get_current_volume())
@@ -130,17 +227,128 @@ def heat_up_demonstration(simulation: Simulation, analyzer: GasSimulationAnalyze
     bar.close()
 
     plt.figure(2, figsize=(9, 6))
-    plt.scatter(V, P, s=np.linspace(0, 20, len(V)))
+    plt.scatter(V, P, s=np.linspace(5, 20, len(V)))
     plt.xlabel("V, m^3")
     plt.ylabel("P, Pascal")
     plt.savefig("VP.png")
     plt.figure(3, figsize=(9, 6))
-    plt.scatter(P, T, s=np.linspace(0, 20, len(V)))
+    plt.scatter(P, T, s=np.linspace(5, 20, len(V)))
     plt.xlabel("P, Pascal")
     plt.ylabel("T, K")
     plt.savefig("PT.png")
     plt.figure(4, figsize=(9, 6))
-    plt.scatter(V, T, s=np.linspace(0, 20, len(V)))
+    plt.scatter(V, T, s=np.linspace(5, 20, len(V)))
+    plt.xlabel("V, m^3")
+    plt.ylabel("T, K")
+    plt.savefig("VT.png")
+
+
+def move_demonstration(simulation: Simulation, analyzer: GasSimulationAnalyzer):
+    fig = plt.figure(figsize=(16, 8))
+    ax1 = fig.add_subplot(1, 2, 1)
+    ax2 = fig.add_subplot(1, 2, 2)
+    V = []
+    P = []
+    T = []
+    E = []
+    X = []
+    iterations = 2500000
+    update_at_iter = 4000 # 1000, 4000, 10000
+    momentum = 0
+    last_display_time = 0
+    iteration = 0
+    bar = tqdm.tqdm(total=iterations, ncols=100)
+    cond_1 = True
+    iter_1 = 100000000
+    cond_2 = False
+    cond_3 = False
+
+    def init():
+        return []
+    def run_frame(frame):
+        nonlocal momentum, last_display_time, iteration, bar, cond_1, cond_2, cond_3, iter_1
+        ax1.cla()
+        ax2.cla()
+        for i in range(update_at_iter):
+            simulation.make_iteration()
+            momentum += simulation.last_iteration_border_momentum_effect
+            iteration += 1
+            bar.update()
+            if iteration == 400000:
+                simulation.force_border_speed(1, simulation.borders_pos[1] / (6e-10))
+            if cond_1 and iteration > 400000 and simulation.get_current_border_positions()[1] < 0:
+                simulation.force_border_speed(1, 0)
+                cond_1 = False
+                cond_2 = True
+                iter_1 = iteration
+            if cond_2 and iteration == iter_1 + 100000:
+                simulation.force_border_speed(0, -20)
+                simulation.force_border_speed(1, -20)
+                simulation.force_border_speed(2, -20)
+                simulation.force_border_speed(3, -20)
+                simulation.force_border_speed(4, -20)
+                simulation.force_border_speed(5, -20)
+                cond_2 = False
+                cond_3 = True
+                iter_1 = simulation.get_current_volume()
+            if cond_3 and simulation.get_current_volume() > iter_1 * 4:
+                simulation.force_border_speed(0, 0)
+                simulation.force_border_speed(1, 0)
+                simulation.force_border_speed(2, 0)
+                simulation.force_border_speed(3, 0)
+                simulation.force_border_speed(4, 0)
+                simulation.force_border_speed(5, 0)
+                cond_3 = False
+        fig.suptitle(f"Iteration: {iteration}\nTime: {simulation.time_since_start} s")
+        P.append(analyzer.calculate_pressure(simulation.get_current_area(), simulation.time_since_start - last_display_time, momentum))
+        V.append(simulation.get_current_volume())
+        T.append(analyzer.calculate_temperature())
+        E.append(analyzer.calculate_total_energy())
+        X.append(simulation.time_since_start)
+
+        speeds = analyzer.calculate_speeds()
+
+        # Гистограмма
+        try:
+            _, _, line1 = ax1.hist(speeds, bins=50, density=True, alpha=0.6, color='g', label='Simulation Data')
+        except ValueError:
+            _, _, line1 = ax1.hist(speeds, bins=1, density=True, alpha=0.6, color='g', label='Simulation Data')
+
+        # Теоретическое распределение
+        v = np.linspace(0, np.max(speeds) * 1.1, 1000)
+        a = np.sqrt(analyzer.mass / (2 * np.pi * k_B * T[-1]))
+        maxwell_dist = 4 * np.pi * (v ** 2) * (a ** 3) * np.exp(- (analyzer.mass * v ** 2) / (2 * k_B * T[-1]))
+        line2, = ax1.plot(v, maxwell_dist, 'r-', label='Maxwell Distribution')
+        ax1.set_title(f'Speed Distribution (T = {T[-1]:.2f} K)')
+        ax1.set_xlabel('Speed (m/s)')
+        ax1.set_ylabel('Probability Density')
+        ax1.legend()
+
+        line3, = ax2.plot(X, T)
+        ax2.set_title('Temperature')
+        ax2.set_xlabel('Time, s')
+        ax2.set_ylabel('T, K')
+
+        momentum = 0
+        last_display_time = simulation.time_since_start
+        return [*line1.patches, line2, line3]
+
+    ani = anim.FuncAnimation(fig, run_frame, init_func=init, frames=int(iterations / update_at_iter), interval=200, blit=False)
+    ani.save("heat_up.mp4")
+    bar.close()
+
+    plt.figure(2, figsize=(9, 6))
+    plt.scatter(V, P, s=np.linspace(2, 20, len(V)), alpha=0.8)
+    plt.xlabel("V, m^3")
+    plt.ylabel("P, Pascal")
+    plt.savefig("VP.png")
+    plt.figure(3, figsize=(9, 6))
+    plt.scatter(P, T, s=np.linspace(2, 20, len(V)), alpha=0.8)
+    plt.xlabel("P, Pascal")
+    plt.ylabel("T, K")
+    plt.savefig("PT.png")
+    plt.figure(4, figsize=(9, 6))
+    plt.scatter(V, T, s=np.linspace(2, 20, len(V)), alpha=0.8)
     plt.xlabel("V, m^3")
     plt.ylabel("T, K")
     plt.savefig("VT.png")
